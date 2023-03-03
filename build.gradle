@@ -1,0 +1,41 @@
+// copied from https://parsiya.net/blog/2019-12-02-developing-and-debugging-java-burp-extensions-with-visual-studio-code/#creating-a-skeleton-extension
+
+// Apply the Java plugin
+apply plugin: 'java'
+sourceCompatibility = 11
+targetCompatibility = 11
+
+// Use Maven (because Burp Extender is on Maven)
+repositories {
+     mavenCentral()
+}
+
+dependencies {
+    implementation 'net.portswigger.burp.extender:burp-extender-api:2.1'
+    implementation 'org.eclipse.jetty:jetty-server:11.0.7'
+    implementation 'org.eclipse.jetty:jetty-servlet:11.0.7'
+    implementation 'javax.servlet:servlet-api:2.5'
+    implementation 'com.google.code.gson:gson:2.8.9'
+    implementation 'com.myjeeva.digitalocean:digitalocean-api-client:2.17'
+}
+
+sourceSets {
+    main {
+        java {
+            // Set the source directory to "src"
+            srcDir 'src'
+        }
+    }
+}
+
+configurations {
+  customConfig.extendsFrom implementation
+}
+
+// Create a task for bundling all dependencies into a jar file.
+task bigJar(type: Jar) {
+    baseName = project.name + '-all'
+    duplicatesStrategy = 'include'
+    from { configurations.customConfig.collect { it.isDirectory() ? it : zipTree(it) } }
+    with jar
+}
