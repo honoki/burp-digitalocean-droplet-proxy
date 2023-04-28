@@ -101,6 +101,8 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
     protected void destroyDODroplet() throws DigitalOceanException, RequestUnsuccessfulException {
         DigitalOcean apiClient = new DigitalOceanClient(this.api_key);
         apiClient.deleteDroplet(this.droplet.getId());
+        // reset the IP so it gets refreshed for next droplet
+        this.ip = null;
     }
 
     @Override
