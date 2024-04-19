@@ -2,6 +2,7 @@ package burp;
 
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.swing.JDialog;
@@ -23,13 +24,14 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 	protected PrintWriter stdout;
     protected String api_key;
     private String ip;
+    private int proxyCount = 0;
     private DigitalOcean apiClient;
 
     // gui elements
 	public DigitalOceanProxyTab myPanel;
 
-    // keep a copy of our proxy droplet
-    Droplet droplet;
+    // keep a copy of our proxy droplets
+    ArrayList<Droplet> droplets = new ArrayList<Droplet>();
     // the script to run on the droplet when it is created
     private String droplet_init_script = "#!/bin/bash\ndocker run -d --name socks5 -p 1080:1080 -e PROXY_USER=burp -e PROXY_PASSWORD=changeme serjs/go-socks5-proxy";
     // the socks password
@@ -63,27 +65,48 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 
     // use the DigitalOcean API to create a new droplet
     protected void deployNewDODroplet(String droplet_name, String region, String size) throws DigitalOceanException, RequestUnsuccessfulException {
+        proxyCount++;
         apiClient = new DigitalOceanClient(this.api_key);
         Droplet newDroplet = new Droplet();
         newDroplet.setName(droplet_name);
         newDroplet.setSize(size);
         newDroplet.setRegion(new Region(region));
         newDroplet.setImage(new Image("docker-20-04")); // use docker so we can run a socks5 proxy
+        newDroplet.setTags(Arrays.asList("burp-proxy")); // set a tag so they get removed when hitting "destroy"
 
         // add your public ssh key to the droplet
         //List<Key> keys = new ArrayList<Key>();
         //keys.add(new Key(123));
         //newDroplet.setKeys(keys);
 
-        this.password = randomPassword(16);
-        stdout.println("Generated random password for proxy: " + this.password);
+        // generate a new password if we don't have one yet (first droplet)
+        if(this.password == null) {
+            this.password = randomPassword(16); 
+            stdout.println("Generated random password for proxy: " + this.password);
+        }
 
         // set the init script to run on the droplet
         newDroplet.setUserData(droplet_init_script.replace("changeme", this.password));
 
         // create a new droplet
         stdout.println("Creating new droplet: " + newDroplet.getName());
-        this.droplet = apiClient.createDroplet(newDroplet);
+        this.droplets.add(apiClient.createDroplet(newDroplet));
+    }
+
+    // get a list of droplets named burp-proxy* that already exist on the account
+    // note that these cannot be used because the proxy password is randomized;
+    // return the number of existing proxy droplets found.
+    protected int loadExistingProxyDroplets() {
+        apiClient = new DigitalOceanClient(this.api_key);
+        Droplets existing_droplets;
+        try {
+            existing_droplets = apiClient.getAvailableDropletsByTagName("burp-proxy", 1, 100);
+            return existing_droplets.getDroplets().size();
+        } catch (DigitalOceanException | RequestUnsuccessfulException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        return -1;
     }
 
     // generate a random password for the socks proxy
@@ -97,21 +120,35 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
         return sb;
     }
 
-    // destroy the droplet
-    protected void destroyDODroplet() throws DigitalOceanException, RequestUnsuccessfulException {
+
+    // destroy one droplet by its id
+    protected void destroyDODroplet(int droplet_id) throws DigitalOceanException, RequestUnsuccessfulException {
         DigitalOcean apiClient = new DigitalOceanClient(this.api_key);
-        apiClient.deleteDroplet(this.droplet.getId());
+        stdout.println("Destroying droplets");
+        apiClient.deleteDroplet(droplet_id);
+        // reset the IP so it gets refreshed for next droplet
+        this.ip = null;
+    }
+
+    // destroy all droplets
+    protected void destroyAllDroplets() throws DigitalOceanException, RequestUnsuccessfulException {
+        DigitalOcean apiClient = new DigitalOceanClient(this.api_key);
+        apiClient.deleteDropletByTagName("burp-proxy");
+        for(Droplet d : this.droplets) {
+            stdout.println("Destroying droplet: " + d.getName());
+            apiClient.deleteDroplet(d.getId());
+        }
         // reset the IP so it gets refreshed for next droplet
         this.ip = null;
     }
 
     @Override
     public void extensionUnloaded() {
-        stdout.println("Destroying droplet: " + this.droplet.getName());
+        stdout.println("Destroying all droplets...");
         try {
-            this.destroyDODroplet();
+            this.destroyAllDroplets();
         } catch(Exception e) {
-            stdout.println("ERROR - Failed to destroy droplet: " + this.droplet.getName());
+            stdout.println("ERROR - Failed to destroy droplets");
             stdout.println(e.getMessage());
         }
         
@@ -123,6 +160,7 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 		
 		JMenuItem enableProxy = new JMenuItem("Enable proxy");
 		JMenuItem disableProxy = new JMenuItem("Disable proxy");
+        JMenuItem cycleProxy = new JMenuItem("Cycle nextdroplet");
 		
 		IHttpRequestResponse[] selected = invocation.getSelectedMessages();
 		
@@ -139,9 +177,17 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 				clearProxyConfiguration();
 			}
 		});
+
+        cycleProxy.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                cycleProxy();
+            }
+        });
 		
 		menu.add(enableProxy);
         menu.add(disableProxy);
+        menu.add(cycleProxy);
 		
 		return menu;
     }
@@ -159,7 +205,7 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
     protected void configureSocksProxy() {
         String ip = "";
         try {
-            ip = this.getDropletIP();
+            ip = this.getCurrentDropletIP();
         } catch (DigitalOceanException | RequestUnsuccessfulException e) {
             stdout.println("ERROR - Failed to get droplet IP address.");
             e.printStackTrace();
@@ -174,6 +220,14 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
         callbacks.loadConfigFromJson("{\"project_options\":{\"connections\":{\"socks_proxy\":{\"dns_over_socks\":false,\"host\":\"0.0.0.0\",\"password\":\"changeme\",\"port\":1080,\"use_proxy\":false,\"use_user_options\":false,\"username\":\"burp\"}}}}");
     }
 
+    public void cycleProxy() {
+        try {
+            this.cycleNextDroplet();
+        } catch (Exception e) {
+            return;
+        }
+    }
+
     public void setApiKey(String api_key) {
         this.api_key = api_key;
         callbacks.saveExtensionSetting("digitalocean-api-key", api_key);
@@ -181,21 +235,45 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 
     public void refreshDroplet() throws DigitalOceanException, RequestUnsuccessfulException {
         stdout.println("Refreshing droplet information...");
-        this.droplet = apiClient.getDropletInfo(droplet.getId());;
+        this.droplets.set(0, apiClient.getDropletInfo(this.droplets.get(0).getId()));
     }
 
-    public String getDropletIP() throws DigitalOceanException, RequestUnsuccessfulException {
-        if(this.ip != null && !this.ip.isEmpty()) {
-            return this.ip;
-        }
+    // cycle to the next droplet in the list
+    public void cycleNextDroplet() throws DigitalOceanException, RequestUnsuccessfulException {
+        stdout.println("Updating droplet list...");
+        int dropletToRemoveID = this.droplets.get(0).getId();
+        
+        // remove the first droplet in the list
+        this.droplets.remove(0);
+        // configure proxy settings for the next droplet
+        this.configureSocksProxy();
+        
+        Thread thread = new Thread(() -> {
+            try {
+                // destroy the proxy we just removed from the list
+                this.destroyDODroplet(dropletToRemoveID);
+                // and spin up a new one so we're ready for the next cycle
+                this.deployNewDODroplet("burp-proxy-"+proxyCount,"nyc1","s-1vcpu-1gb");
+            } catch (DigitalOceanException | RequestUnsuccessfulException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        });
+        thread.start();
+    }
+
+    public String getCurrentDropletIP() throws DigitalOceanException, RequestUnsuccessfulException {
+        //if(this.ip != null && !this.ip.isEmpty()) {
+        //    return this.ip;
+        //}
         this.refreshDroplet();
-        stdout.println("Getting droplet IP address: " + this.droplet.getName());
-        this.ip = this.droplet.getNetworks().getVersion4Networks().get(0).getIpAddress();
+        stdout.println("Getting droplet IP address: " + this.droplets.get(0).getName());
+        this.ip = this.droplets.get(0).getNetworks().getVersion4Networks().get(0).getIpAddress();
         return this.ip;
     }
 
     public String getDropletStatus() throws DigitalOceanException, RequestUnsuccessfulException {
         this.refreshDroplet();
-        return this.droplet.getStatus().toString();
+        return this.droplets.get(0).getStatus().toString();
     }
 }

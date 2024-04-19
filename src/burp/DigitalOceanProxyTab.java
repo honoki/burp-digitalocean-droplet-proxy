@@ -2,7 +2,7 @@ package burp;
 
 import javax.swing.JPanel;
 import javax.swing.JLabel;
-import javax.swing.JTextField;
+import javax.swing.JPasswordField;
 import javax.swing.GroupLayout;
 import javax.swing.GroupLayout.Alignment;
 import javax.swing.LayoutStyle.ComponentPlacement;
@@ -17,16 +17,18 @@ import javax.swing.JTextPane;
 
 public class DigitalOceanProxyTab extends JPanel {
     private BurpExtender burp;
-	private JTextField textField_1;
+	private JPasswordField textField_1;
     private JTextPane textPane;
     // status of the proxy: 0 = not deployed, 1 = deployed and waiting for network, 2 = deployed and ready
     private int STATUS = 0;
+    private int NB_DROPLETS = 2;
 
     public DigitalOceanProxyTab(BurpExtender burp) {
 		
 		this.burp = burp;
 		
 		JLabel lblApiKey = new JLabel("DigitalOcean API key");
+        JButton btnDestroy = new JButton("Destroy");
         this.textPane = new JTextPane();
 				
 		JButton btnDeploy = new JButton("Deploy");
@@ -35,9 +37,19 @@ public class DigitalOceanProxyTab extends JPanel {
 				burp.setApiKey(textField_1.getText());
 				
 				try {
-                    textPane.setText("Deploying proxy to DigitalOcean...");
-                    burp.deployNewDODroplet("burp-proxy","nyc1","s-1vcpu-1gb");
-                    textPane.setText(textPane.getText() + "\nProxy droplet is deploying, waiting for network...");
+                    // First get list of existing droplet in account that weren't deleted yet
+                    int nbExisting = burp.loadExistingProxyDroplets();
+                    if(nbExisting > 0) {
+                        textPane.setText("WARNING: there are still "+nbExisting+" proxies deployed - they will be removed when hitting the Destroy button.");
+                    }
+
+
+                    btnDeploy.setEnabled(false);
+                    textPane.setText(textPane.getText() + "\nDeploying "+NB_DROPLETS+" proxy droplets to DigitalOcean...");
+                    for(int i=0; i<NB_DROPLETS; i++) {
+                        burp.deployNewDODroplet("burp-proxy-"+i,"nyc1","s-1vcpu-1gb");
+                    }
+                    textPane.setText(textPane.getText() + "\nProxy droplets are deploying, waiting for first droplet to come online...");
                     STATUS = 1;
                     Thread thread = new Thread(() -> {
                         // as long as status is "new", wait 60 seconds and check again
@@ -54,6 +66,7 @@ public class DigitalOceanProxyTab extends JPanel {
                             e1.printStackTrace();
                         }
                         finishedWaiting();
+                        btnDestroy.setEnabled(true);
                     });
                     thread.start();
                 } catch (DigitalOceanException | RequestUnsuccessfulException e1) {
@@ -63,23 +76,24 @@ public class DigitalOceanProxyTab extends JPanel {
 			}
 		});
 		
-		textField_1 = new JTextField(burp.api_key);
+		textField_1 = new JPasswordField(burp.api_key);
 		textField_1.setColumns(10);
 		
-		JButton btnDestroy = new JButton("Destroy");
 		btnDestroy.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
                 // you can't destroy what is never built
                 if(STATUS == 0) return;
                 try {
-                    textPane.setText(textPane.getText() +"\nDestroying proxy droplet...");
-                    burp.destroyDODroplet();
-                    textPane.setText(textPane.getText() +"\nRemoving Burp socks proxy config...");
+                    btnDestroy.setEnabled(false);
+                    textPane.setText(textPane.getText() +"\nDestroying proxies...");
+                    burp.destroyAllDroplets();
+                    textPane.setText(textPane.getText() +"\nResetting Burp socks proxy config...");
                     burp.clearProxyConfiguration();
-                    textPane.setText(textPane.getText() +"\nProxy destroyed.");
+                    textPane.setText(textPane.getText() +"\nProxies destroyed.");
                     STATUS = 0;
+                    btnDeploy.setEnabled(true);
                 } catch (Exception e1) {
-                    burp.stdout.println("Error destroying droplet: " + e1.getMessage());
+                    burp.stdout.println("Error destroying proxies: " + e1.getMessage());
                     e1.printStackTrace();
                 }
 				
