@@ -26,6 +26,7 @@ public class DigitalOceanProxyTab extends JPanel {
     public DigitalOceanProxyTab(BurpExtender burp) {
 		
 		this.burp = burp;
+        this.burp.setProxyTab(this);
 		
 		JLabel lblApiKey = new JLabel("DigitalOcean API key");
         JButton btnDestroy = new JButton("Destroy");
@@ -100,6 +101,39 @@ public class DigitalOceanProxyTab extends JPanel {
 			}
 		});
 		
+		JButton btnEnableProxy = new JButton("Enable Proxy");
+		JButton btnDisableProxy = new JButton("Disable Proxy");
+        btnEnableProxy.setEnabled(!burp.isProxyEnabled);
+        btnDisableProxy.setEnabled(burp.isProxyEnabled);
+		JButton btnCycleNextDroplet = new JButton("Cycle Next Droplet");
+		btnEnableProxy.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				burp.configureSocksProxy();
+                btnDisableProxy.setEnabled(true);
+                btnEnableProxy.setEnabled(false);
+			}
+		});
+
+		btnDisableProxy.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				burp.clearProxyConfiguration();
+                btnDisableProxy.setEnabled(false);
+                btnEnableProxy.setEnabled(true);
+				textPane.setText(textPane.getText() + "\nProxy disabled.");
+			}
+		});
+
+		btnCycleNextDroplet.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				try {
+					burp.cycleProxy();
+				} catch (Exception ex) {
+					burp.stdout.println("Error cycling proxy: " + ex.getMessage());
+					ex.printStackTrace();
+				}
+			}
+		});
+
 		GroupLayout groupLayout = new GroupLayout(this);
 		groupLayout.setHorizontalGroup(
 			groupLayout.createParallelGroup(Alignment.LEADING)
@@ -113,25 +147,38 @@ public class DigitalOceanProxyTab extends JPanel {
 							.addGap(43)
 							.addComponent(textField_1, GroupLayout.PREFERRED_SIZE, 318, GroupLayout.PREFERRED_SIZE)
 							.addGap(3)
-							.addComponent(btnDestroy)))
+							.addComponent(btnDestroy))
+						// New row for additional buttons
+						.addGroup(groupLayout.createSequentialGroup()
+							.addComponent(btnEnableProxy)
+							.addGap(10)
+							.addComponent(btnDisableProxy)
+							.addGap(10)
+							.addComponent(btnCycleNextDroplet)))
 					.addContainerGap(20, Short.MAX_VALUE))
 		);
 		groupLayout.setVerticalGroup(
 			groupLayout.createParallelGroup(Alignment.LEADING)
-				.addGroup(groupLayout.createSequentialGroup()
-					.addGap(40)
-					.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
-						.addGroup(groupLayout.createSequentialGroup()
-							.addGap(4)
-							.addComponent(lblApiKey))
+					.addGroup(groupLayout.createSequentialGroup()
+						.addGap(40)
+						.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
+							.addGroup(groupLayout.createSequentialGroup()
+								.addGap(4)
+								.addComponent(lblApiKey))
+							.addGroup(groupLayout.createParallelGroup(Alignment.BASELINE)
+								.addComponent(btnDeploy)
+								.addComponent(textField_1, GroupLayout.PREFERRED_SIZE, GroupLayout.DEFAULT_SIZE, GroupLayout.PREFERRED_SIZE)
+								.addComponent(btnDestroy)))
+						.addGap(18)
+						// New row for additional buttons
 						.addGroup(groupLayout.createParallelGroup(Alignment.BASELINE)
-							.addComponent(btnDeploy)
-							.addComponent(textField_1, GroupLayout.PREFERRED_SIZE, GroupLayout.DEFAULT_SIZE, GroupLayout.PREFERRED_SIZE)
-							.addComponent(btnDestroy)))
-					.addGap(18)
-					.addPreferredGap(ComponentPlacement.UNRELATED)
-					.addComponent(textPane, GroupLayout.DEFAULT_SIZE, 49, Short.MAX_VALUE)
-					.addGap(38))
+							.addComponent(btnEnableProxy)
+							.addComponent(btnDisableProxy)
+							.addComponent(btnCycleNextDroplet))
+						.addGap(18)
+						.addPreferredGap(ComponentPlacement.UNRELATED)
+						.addComponent(textPane, GroupLayout.DEFAULT_SIZE, 49, Short.MAX_VALUE)
+						.addGap(38))
 		);
 		setLayout(groupLayout);
 
@@ -146,10 +193,14 @@ public class DigitalOceanProxyTab extends JPanel {
         // don't execute this if the proxy is destoryed in the meantime
         if(STATUS == 0)
             return;
-        textPane.setText(textPane.getText() + "\nProxy droplet is ready, configuring proxy...");
-        burp.configureSocksProxy();
-        textPane.setText(textPane.getText() +"\nProxy settings configured.");
-        textPane.setText(textPane.getText() +"\nProxy is ready to use.");
+        textPane.setText(textPane.getText() + "\nProxy droplet is ready, click 'enable proxy' to route traffic...");
+        // burp.configureSocksProxy();
+        // textPane.setText(textPane.getText() +"\nProxy settings configured.");
+        // textPane.setText(textPane.getText() +"\nProxy is ready to use.");
         STATUS = 2;
+    }
+
+    protected void log(String log) {
+        textPane.setText(textPane.getText() + "\n"+log);
     }
 }

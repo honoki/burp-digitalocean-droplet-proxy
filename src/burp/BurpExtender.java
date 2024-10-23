@@ -21,11 +21,15 @@ import com.myjeeva.digitalocean.exception.*;
 public class BurpExtender extends JDialog implements IBurpExtender, IExtensionStateListener, IContextMenuFactory, ITab  {
 
     private IBurpExtenderCallbacks callbacks;
+    private DigitalOceanProxyTab proxyTab;
 	protected PrintWriter stdout;
     protected String api_key;
     private String ip;
     private int proxyCount = 0;
     private DigitalOcean apiClient;
+    private String tabCaption = "Droplet Proxy";
+
+    protected boolean isProxyEnabled = false;
 
     // gui elements
 	public DigitalOceanProxyTab myPanel;
@@ -61,6 +65,10 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 
         stdout.println("DigitalOcean Droplet Proxy extension initialized.");
     
+    }
+
+    protected void setProxyTab(DigitalOceanProxyTab tab) {
+        this.proxyTab = tab;
     }
 
     // use the DigitalOcean API to create a new droplet
@@ -160,14 +168,17 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 		
 		JMenuItem enableProxy = new JMenuItem("Enable proxy");
 		JMenuItem disableProxy = new JMenuItem("Disable proxy");
-        JMenuItem cycleProxy = new JMenuItem("Cycle nextdroplet");
-		
-		IHttpRequestResponse[] selected = invocation.getSelectedMessages();
+        enableProxy.setEnabled(!this.isProxyEnabled);
+        disableProxy.setEnabled(this.isProxyEnabled);
+        JMenuItem cycleProxy = new JMenuItem("Cycle next droplet");
 		
 		enableProxy.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
 				configureSocksProxy();
+                
+                disableProxy.setEnabled(true);
+                enableProxy.setEnabled(false);
 			}
 		});
 		
@@ -175,6 +186,10 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 			@Override
 			public void actionPerformed(ActionEvent e) {
 				clearProxyConfiguration();
+                
+                disableProxy.setEnabled(false);
+                enableProxy.setEnabled(true);
+                proxyTab.log("Proxy disabled.");
 			}
 		});
 
@@ -194,7 +209,7 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
 
     @Override
     public String getTabCaption() {
-        return "Droplet Proxy";
+        return this.tabCaption;
     }
 
     @Override
@@ -214,10 +229,18 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
         callbacks.loadConfigFromJson("{\"project_options\":{\"connections\":{\"socks_proxy\":{\"dns_over_socks\":false,\"host\":\"ip_address\",\"password\":\"changeme\",\"port\":1080,\"use_proxy\":true,\"use_user_options\":false,\"username\":\"burp\"}}}}"
         .replace("ip_address",ip)
         .replace("changeme",this.password));
+
+        this.isProxyEnabled = true;
+        this.proxyTab.log("Using SOCKS proxy at "+ip+":1080 for all outgoing requests");
+        
+        this.setTabCaption("Droplet Proxy ["+ip+"]");
     }
 
     public void clearProxyConfiguration() {
         callbacks.loadConfigFromJson("{\"project_options\":{\"connections\":{\"socks_proxy\":{\"dns_over_socks\":false,\"host\":\"0.0.0.0\",\"password\":\"changeme\",\"port\":1080,\"use_proxy\":false,\"use_user_options\":false,\"username\":\"burp\"}}}}");
+        
+        this.setTabCaption("Droplet Proxy [off]");
+        this.isProxyEnabled = false;
     }
 
     public void cycleProxy() {
@@ -275,5 +298,17 @@ public class BurpExtender extends JDialog implements IBurpExtender, IExtensionSt
     public String getDropletStatus() throws DigitalOceanException, RequestUnsuccessfulException {
         this.refreshDroplet();
         return this.droplets.get(0).getStatus().toString();
+    }
+
+    private boolean isProxyEnabled() {
+        // Implement logic to determine if the proxy is currently enabled
+        // This could be based on a boolean flag or checking the current configuration
+        // For example, you might check if the proxy settings are loaded
+        return true; // Replace with actual logic
+    }
+
+    private void setTabCaption(String caption) {
+        this.tabCaption = caption;
+        // callbacks.addSuiteTab(this);
     }
 }
